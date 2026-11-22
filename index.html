@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090b1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Neon Jump">
+  <title>Neon Jump</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <style>
+    :root { color-scheme:dark; --bg:#090b1a; --panel:#141832; --cyan:#65f5ff; --pink:#ff5ac8; }
+    * { box-sizing:border-box }
+    html,body { margin:0; min-height:100%; background:var(--bg); color:#f5f7ff; font-family:system-ui,-apple-system,Segoe UI,sans-serif; }
+    body { min-height:100svh; }
+    .screen { min-height:100svh; padding: max(22px,env(safe-area-inset-top)) 20px max(22px,env(safe-area-inset-bottom)); display:flex; flex-direction:column; align-items:center; justify-content:center; }
+    #install { width:min(100%,520px); text-align:center; }
+    .logo { width:82px;height:82px;border-radius:25px;display:grid;place-items:center;margin:0 auto 18px;background:linear-gradient(145deg,#1b2854,#11142c);border:1px solid #384a83;box-shadow:0 0 35px #37ddec33;font-size:42px; }
+    h1 { margin:0; font-size:clamp(34px,9vw,52px); letter-spacing:-2px; }
+    .glow { color:var(--cyan); text-shadow:0 0 22px #65f5ff55; }
+    p { color:#b7bfdc; line-height:1.55; }
+    .instructions { margin:25px 0 18px; padding:18px; text-align:left; border:1px solid #30395f; border-radius:18px; background:var(--panel); }
+    .instructions h2 { margin:0 0 10px; font-size:17px; }
+    .instructions ol { margin:0; padding-left:22px; color:#dce2ff; line-height:1.8; }
+    .hint { font-size:13px; color:#98a3c8; }
+    button { border:0; border-radius:14px; padding:14px 20px; font-weight:800; font-size:16px; color:#06111b; background:linear-gradient(90deg,var(--cyan),#9bffce); cursor:pointer; box-shadow:0 8px 28px #65f5ff22; }
+    #game { display:none; width:min(100%,620px); gap:14px; }
+    .top { width:100%; display:flex; align-items:center; justify-content:space-between; }
+    .score { font-weight:800; color:var(--cyan); font-size:20px; }
+    canvas { width:100%; aspect-ratio:  -- ; height:auto; background:linear-gradient(#111a3a,#090d20 75%); border:1px solid #35416f; border-radius:20px; touch-action:manipulation; box-shadow:0 0 40px #42d9ef16; }
+    .game-help { text-align:center; margin:0; font-size:14px; }
+    .controls { display:flex; gap:10px; width:100%; }
+    .controls button { flex:1; }
+    .secondary { background:#242c50; color:#e7ecff; box-shadow:none; border:1px solid #414d7c; }
+    body.standalone #install { display:none !important; }
+    body.standalone #game { display:flex !important; }
+  </style>
+</head>
+<body>
+  <main id="install" class="screen">
+    <div class="logo">⚡</div>
+    <h1>NEON <span class="glow">JUMP</span></h1>
+    <p>A tiny arcade challenge. Add it to your Home Screen to launch it like a normal app.</p>
+    <section class="instructions">
+      <h2>📱 Add to your iPhone Home Screen</h2>
+      <ol>
+        <li>Open this page in <b>Safari</b>.</li>
+        <li>Tap the <b>Share</b> button (the square with an arrow).</li>
+        <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+        <li>Tap <b>Add</b> in the top-right corner.</li>
+        <li>Launch <b>Neon Jump</b> from your Home Screen!</li>
+      </ol>
+    </section>
+    <p class="hint">On Android, use your browser menu and choose “Install app” or “Add to Home screen”.</p>
+  </main>
+
+  <main id="game" class="screen">
+    <div class="top"><b>⚡ NEON JUMP</b><span class="score">SCORE: <span id="score">0</span></span></div>
+    <canvas id="board" width="600" height="760" aria-label="Neon Jump game"></canvas>
+    <p class="game-help" id="message">Tap the game to jump. Avoid the blocks!</p>
+    <div class="controls">
+      <button id="jump">JUMP</button>
+      <button id="restart" class="secondary">RESTART</button>
+    </div>
+  </main>
+
+<script>
+(() => {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (standalone) document.body.classList.add('standalone');
+
+  const install = document.getElementById('install');
+  const game = document.getElementById('game');
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+  }
+
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const message = document.getElementById('message');
+  let player, obstacles, score, speed, frame, running, started, raf;
+
+  function reset() {
+    player = {x:105, y:590, vy:0, size:34, grounded:true};
+    obstacles = []; score = 0; speed = 5; frame = 0; running = true; started = false;
+    scoreEl.textContent = '0';
+    message.textContent = 'Tap the game to jump. Avoid the blocks!';
+    draw();
+  }
+  function jump() {
+    if (!running) { reset(); return; }
+    if (!started) started = true;
+    if (player.grounded) { player.vy = -15; player.grounded = false; }
+  }
+  function draw() {
+    ctx.clearRect(0,0,600,760);
+    // stars
+    for (let i=0;i<38;i++) {
+      const x=(i*97+frame*.25)%600, y=(i*53)%520;
+      ctx.fillStyle='#8aa5e8'; ctx.globalAlpha=.25+(i%3)*.15;
+      ctx.fillRect(x,y,2,2);
+    }
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#25345d'; ctx.fillRect(0,640,600,120);
+    ctx.strokeStyle='#65f5ff'; ctx.globalAlpha=.55; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(0,640); ctx.lineTo(600,640); ctx.stroke(); ctx.globalAlpha=1;
+    // player
+    ctx.shadowColor='#65f5ff'; ctx.shadowBlur=22; ctx.fillStyle='#65f5ff';
+    ctx.fillRect(player.x,player.y,player.size,player.size); ctx.shadowBlur=0;
+    ctx.fillStyle='#10162e'; ctx.fillRect(player.x+21,player.y+8,6,6);
+    // obstacles
+    obstacles.forEach(o => {
+      ctx.shadowColor='#ff5ac8'; ctx.shadowBlur=18; ctx.fillStyle='#ff5ac8';
+      ctx.fillRect(o.x, o.y, o.w, o.h); ctx.shadowBlur=0;
+    });
+    if (!started && running) {
+      ctx.fillStyle='#fff'; ctx.font='bold 25px system-ui'; ctx.textAlign='center';
+      ctx.fillText('TAP TO JUMP',300,300);
+    }
+    if (!running) {
+      ctx.fillStyle='rgba(5,8,22,.68)'; ctx.fillRect(0,0,600,760);
+      ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.font='bold 48px system-ui';
+      ctx.fillText('GAME OVER',300,340);
+      ctx.font='22px system-ui'; ctx.fillStyle='#65f5ff'; ctx.fillText('Tap JUMP or RESTART',300,385);
+    }
+  }
+  function tick() {
+    if (!running) return;
+    frame++;
+    if (started) {
+      player.vy += .72; player.y += player.vy;
+      if (player.y+player.size >= 640) { player.y=640-player.size; player.vy=0; player.grounded=true; }
+      if (frame%86===0) obstacles.push({x:620,y:640-42,w:30+Math.random()*20,h:42});
+      obstacles.forEach(o=>o.x-=speed);
+      obstacles=obstacles.filter(o=>o.x+o.w>0);
+      for (const o of obstacles) {
+        if (player.x+player.size>o.x+5 && player.x<o.x+o.w-5 && player.y+player.size>o.y+5) {
+          running=false; message.textContent='Game over! Try again.'; break;
+        }
+      }
+      if (running) { score++; speed=5+Math.min(score/500,4); scoreEl.textContent=Math.floor(score/10); }
+    }
+    draw();
+    if (running) raf=requestAnimationFrame(tick);
+  }
+  function startGame() { cancelAnimationFrame(raf); reset(); tick(); }
+  canvas.addEventListener('pointerdown', jump);
+  document.getElementById('jump').addEventListener('click', jump);
+  document.getElementById('restart').addEventListener('click', startGame);
+  if (standalone) startGame();
+})();
+</script>
+</body>
+</html>
